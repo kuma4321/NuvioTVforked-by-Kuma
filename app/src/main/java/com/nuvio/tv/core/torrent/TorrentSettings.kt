@@ -37,7 +37,7 @@ data class TorrentSettingsData(
     val p2pEnabled: Boolean = false,
     val enableUpload: Boolean = true,
     val hideTorrentStats: Boolean = true,
-    val torrentProfile: TorrentProfile = TorrentProfile.BALANCED,
+    val torrentProfile: TorrentProfile = TorrentProfile.FAST,
     val cacheSize: TorrentCacheSize = TorrentCacheSize.GB_2
 )
 
@@ -62,7 +62,7 @@ class TorrentSettings @Inject constructor(
             hideTorrentStats = prefs[Keys.HIDE_TORRENT_STATS] ?: true,
             torrentProfile = prefs[Keys.TORRENT_PROFILE]
                 ?.let { stored -> TorrentProfile.entries.firstOrNull { it.name == stored } }
-                ?: TorrentProfile.BALANCED,
+                ?: TorrentProfile.FAST,
             cacheSize = prefs[Keys.CACHE_SIZE]
                 ?.let { stored -> TorrentCacheSize.entries.firstOrNull { it.name == stored } }
                 ?: TorrentCacheSize.GB_2

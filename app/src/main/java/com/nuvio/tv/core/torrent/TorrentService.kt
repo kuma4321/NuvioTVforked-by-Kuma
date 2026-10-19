@@ -330,7 +330,8 @@ class TorrentService @Inject constructor(
                 cacheDirectory = cacheDirectory,
                 uploadEnabled = configurationKey.uploadEnabled,
                 torrentProfile = configurationKey.torrentProfile,
-                diskCacheCapacityBytes = configurationKey.diskCacheCapacityBytes
+                diskCacheCapacityBytes = configurationKey.diskCacheCapacityBytes,
+                memoryCacheCapacityBytes = torrentMemoryCacheBytesFor(context)
             )
         ).also { created ->
             engine = created

@@ -1,0 +1,67 @@
+name: Build APK Nuvio TV Fluide
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [fluide]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Configuration du compte Nuvio (serveur officiel)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          mkdir -p /tmp/official && cd /tmp/official
+          tag=$(gh release list -R NuvioMedia/NuvioMobile --limit 10 --json tagName,isDraft --jq '[.[]|select(.isDraft|not)][0].tagName')
+          gh release download "$tag" -R NuvioMedia/NuvioMobile --pattern '*arm64-v8a*.apk' --clobber
+          apk=$(ls *.apk | head -1)
+          unzip -qo "$apk" 'classes*.dex' -d dex
+          strings -n 20 dex/*.dex | sort -u > all.txt
+          url=$(grep -Eo '^https://api\.nuvio\.tv/?$' all.txt | head -1 | sed 's#/$##')
+          fallback=$(grep -Eo '^https://api-two\.nuvioapp\.space/?$' all.txt | head -1 | sed 's#/$##')
+          key=$(grep -Eo '^sb_publishable_[A-Za-z0-9_-]{20,}$' all.txt | head -1)
+          if [ -z "$key" ]; then
+            for jwt in $(grep -Eo '^eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$' all.txt); do
+              p=$(echo "$jwt" | cut -d. -f2 | tr '_-' '/+'); while [ $(( ${#p} % 4 )) -ne 0 ]; do p="$p="; done
+              if echo "$p" | base64 -d 2>/dev/null | grep -q '"anon"'; then key="$jwt"; break; fi
+            done
+          fi
+          if [ -z "$url" ] || [ -z "$key" ]; then echo "::error::Config compte introuvable (url=${url:+ok} cle=${key:+ok})"; exit 1; fi
+          echo "::add-mask::$key"
+          cd "$GITHUB_WORKSPACE"
+          for f in local.properties local.dev.properties; do
+            { echo "NUVIO_SUPABASE_URL=$url"; echo "NUVIO_SUPABASE_ANON_KEY=$key"; [ -n "$fallback" ] && echo "NUVIO_SUPABASE_FALLBACK_URL=$fallback"; } > $f
+          done
+          echo "::notice::Compte Nuvio configure (serveur $url)"
+      - name: Signature de CI
+        run: |
+          keytool -genkeypair -keystore "$RUNNER_TEMP/ci-debug.jks" -storepass android -alias androiddebugkey -keypass android -dname "CN=Android Debug,O=Android,C=US" -keyalg RSA -keysize 2048 -validity 10000
+          { echo "NUVIO_RELEASE_STORE_FILE=$RUNNER_TEMP/ci-debug.jks"; echo "NUVIO_RELEASE_KEY_ALIAS=androiddebugkey"; echo "NUVIO_RELEASE_KEY_PASSWORD=android"; echo "NUVIO_RELEASE_STORE_PASSWORD=android"; } >> "$GITHUB_ENV"
+      - name: Compilation de l'APK (fullDebug)
+        shell: bash
+        run: |
+          set +e
+          ./gradlew :app:assembleFullDebug --stacktrace 2>&1 | tee build.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            { grep -E "^e: " build.log | head -8; grep -A6 "What went wrong" build.log | tr '\n' ' ' | cut -c1-900; } | while IFS= read -r line; do echo "::error::${line:0:900}"; done
+          fi
+          exit $status
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Nuvio-TV-Fluide-APK
+          path: app/build/outputs/apk/full/debug/*.apk
+          if-no-files-found: error

@@ -657,7 +657,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                 ADAPTIVE_QUALITY_INCREASE_MIN_DURATION_MS,
                 AdaptiveTrackSelection.DEFAULT_MAX_DURATION_FOR_QUALITY_DECREASE_MS,
                 AdaptiveTrackSelection.DEFAULT_MIN_DURATION_TO_RETAIN_AFTER_DISCARD_MS,
-                AdaptiveTrackSelection.DEFAULT_BANDWIDTH_FRACTION
+                0.85f // Utilise 85 % du débit mesuré (70 % par défaut) pour monter plus haut en qualité.
             )
             trackSelector = object : DefaultTrackSelector(context, adaptiveTrackSelectionFactory) {
                 override fun selectAllTracks(
@@ -932,6 +932,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                 }
             ).setExtensionRendererMode(effectiveDecoderPriority)
                 .setEnableDecoderFallback(true)
+                .forceEnableMediaCodecAsynchronousQueueing()
                 .setMediaCodecSelector(codecSelector)
                 .applyMapDv7ToHevcIfSupported(mapDv7ToHevcEnabled)
 
@@ -1027,6 +1028,8 @@ internal fun PlayerRuntimeController.initializePlayer(
             libassPipelineSwitchInFlight = false
 
             _exoPlayer?.apply {
+                // Garde le Wi-Fi actif pendant la lecture (évite les baisses de débit en veille réseau).
+                runCatching { setWakeMode(C.WAKE_MODE_NETWORK) }
                 val audioAttributes = AudioAttributes.Builder()
                     .setUsage(C.USAGE_MEDIA)
                     .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)

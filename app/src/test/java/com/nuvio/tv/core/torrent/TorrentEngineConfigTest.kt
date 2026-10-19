@@ -32,7 +32,7 @@ class TorrentEngineConfigTest {
         )
 
         assertEquals(0, uploading.streamInactivityTimeoutMilliseconds)
-        assertEquals(NuvioUploadMode.Unlimited, uploading.uploadMode)
+        assertEquals(NuvioUploadMode.Limited, uploading.uploadMode)
         assertEquals(NuvioTorrentProfile.Fast, uploading.torrentProfile)
         assertEquals(TorrentCacheSize.GB_5.bytes, uploading.diskCacheCapacityBytes)
         assertEquals(0, downloadOnly.streamInactivityTimeoutMilliseconds)

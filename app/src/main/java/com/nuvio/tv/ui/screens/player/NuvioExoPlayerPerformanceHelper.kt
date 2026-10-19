@@ -318,14 +318,18 @@ object NuvioExoPlayerPerformanceHelper {
                 .setBackBuffer(effectiveBackBufferMs(), true)
                 .build()
         } else {
+            // Profil « lecture fluide » : démarrage rapide, long tampon avant borné par la RAM.
+            val heapMb = Runtime.getRuntime().maxMemory() / (1024L * 1024L)
+            val targetMb = (heapMb * 0.45).toInt().coerceIn(100, 384)
             DefaultLoadControl.Builder()
-                .setTargetBufferBytes(100 * 1024 * 1024)
+                .setTargetBufferBytes(targetMb * 1024 * 1024)
                 .setBufferDurationsMs(
-                    DefaultLoadControl.DEFAULT_MIN_BUFFER_MS,
-                    70_000,
-                    DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_MS,
-                    5_000
+                    30_000,
+                    if (heapMb >= 384L) 180_000 else 90_000,
+                    1_500,
+                    4_000
                 )
+                .setPrioritizeTimeOverSizeThresholds(true)
                 .build()
         }
     }

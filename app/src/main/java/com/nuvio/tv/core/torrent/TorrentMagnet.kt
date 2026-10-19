@@ -20,7 +20,19 @@ internal val DefaultTorrentTrackers = listOf(
     "udp://tracker.fnix.net:6969/announce",
     "udp://tracker.flatuslifir.is:6969/announce",
     "udp://tracker.ducks.party:1984/announce",
-    "udp://tracker.bluefrog.pw:2710/announce"
+    "udp://tracker.bluefrog.pw:2710/announce",
+    "udp://open.tracker.cl:1337/announce",
+    "udp://exodus.desync.com:6969/announce",
+    "udp://tracker.dler.org:6969/announce",
+    "udp://explodie.org:6969/announce",
+    "udp://p4p.arenabg.com:1337/announce",
+    "udp://opentracker.io:6969/announce",
+    "udp://open.free-tracker.ga:6969/announce",
+    "udp://tracker.tiny-vps.com:6969/announce",
+    "udp://tracker-udp.gbitt.info:80/announce",
+    "udp://tracker.moeking.me:6969/announce",
+    "https://tracker.tamersunion.org:443/announce",
+    "https://tracker.gbitt.info:443/announce"
 )
 
 internal fun canonicalInfoHash(infoHash: String): String {
