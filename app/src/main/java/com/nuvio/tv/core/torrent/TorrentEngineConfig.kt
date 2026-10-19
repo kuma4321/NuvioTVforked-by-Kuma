@@ -11,8 +11,10 @@ internal fun buildTorrentEngineConfig(
     uploadEnabled: Boolean,
     torrentProfile: TorrentProfile,
     diskCacheCapacityBytes: Long,
-    memoryCacheCapacityBytes: Long = 64L * 1024L * 1024L
+    memoryCacheCapacityBytes: Long = 64L * 1024L * 1024L,
+    listenPort: Int = 0
 ): NuvioEngineConfig = NuvioEngineConfig(
+    listenPort = listenPort,
     dataDirectory = stateDirectory,
     cacheDirectory = cacheDirectory,
     memoryCacheCapacityBytes = memoryCacheCapacityBytes,

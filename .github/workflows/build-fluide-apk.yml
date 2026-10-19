@@ -46,10 +46,13 @@ jobs:
             { echo "NUVIO_SUPABASE_URL=$url"; echo "NUVIO_SUPABASE_ANON_KEY=$key"; [ -n "$fallback" ] && echo "NUVIO_SUPABASE_FALLBACK_URL=$fallback"; } > $f
           done
           echo "::notice::Compte Nuvio configure (serveur $url)"
-      - name: Signature de CI
+      - name: Clé de signature fixe (mises à jour sans désinstaller)
+        shell: bash
+        env:
+          KS: ${{ secrets.FLUIDE_KEYSTORE_B64 }}
         run: |
-          keytool -genkeypair -keystore "$RUNNER_TEMP/ci-debug.jks" -storepass android -alias androiddebugkey -keypass android -dname "CN=Android Debug,O=Android,C=US" -keyalg RSA -keysize 2048 -validity 10000
-          { echo "NUVIO_RELEASE_STORE_FILE=$RUNNER_TEMP/ci-debug.jks"; echo "NUVIO_RELEASE_KEY_ALIAS=androiddebugkey"; echo "NUVIO_RELEASE_KEY_PASSWORD=android"; echo "NUVIO_RELEASE_STORE_PASSWORD=android"; } >> "$GITHUB_ENV"
+          if [ -n "$KS" ]; then printf '%s' "$KS" | base64 -d > "$RUNNER_TEMP/fluide.jks"; else cp ci/fluide-signing.jks "$RUNNER_TEMP/fluide.jks"; fi
+          { echo "NUVIO_RELEASE_STORE_FILE=$RUNNER_TEMP/fluide.jks"; echo "NUVIO_RELEASE_KEY_ALIAS=androiddebugkey"; echo "NUVIO_RELEASE_KEY_PASSWORD=android"; echo "NUVIO_RELEASE_STORE_PASSWORD=android"; } >> "$GITHUB_ENV"
       - name: Compilation de l'APK (fullDebug)
         shell: bash
         run: |

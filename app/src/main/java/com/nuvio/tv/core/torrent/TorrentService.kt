@@ -138,7 +138,10 @@ class TorrentService @Inject constructor(
         var startupStatsJob: Job? = null
         return try {
             phase.set("ensure_engine")
-            val magnetUri = buildMagnetUri(infoHash, (DefaultTorrentTrackers + trackers).distinct())
+            val magnetUri = buildMagnetUri(
+                infoHash,
+                (trackers + DefaultTorrentTrackers + P2pNetworkBoost.cachedDynamicTrackers(context)).distinct()
+            )
             val resolvedEngine = ensureEngine()
             activeEngine = resolvedEngine
             val payloadDownloadBaseline = resolvedEngine.stats.value.totalPayloadDownloadBytes
@@ -177,6 +180,7 @@ class TorrentService @Inject constructor(
                 throw CancellationException("Torrent stream start was cancelled")
             }
             attached = true
+            P2pNetworkBoost.acquireStreamingLocks(context)
 
             startStatsPolling(resolvedEngine, stream, generation, payloadDownloadBaseline)
             val initial = resolvedEngine.stats.value
@@ -247,6 +251,7 @@ class TorrentService @Inject constructor(
             _state.value = TorrentState.Idle
             value to job
         }
+        P2pNetworkBoost.releaseStreamingLocks()
         detached.second?.cancel()
         return detached.first
     }
@@ -266,6 +271,7 @@ class TorrentService @Inject constructor(
             _state.value = terminalState
             value to job
         }
+        if (detached != null) P2pNetworkBoost.releaseStreamingLocks()
         detached?.second?.cancel()
         return detached?.first
     }
@@ -324,16 +330,26 @@ class TorrentService @Inject constructor(
             "Could not create the Nuvio Engine cache directory"
         }
         migrateNestedPayloadDirectory(cacheDirectory)
-        return NuvioEngine.create(
-            buildTorrentEngineConfig(
-                stateDirectory = stateDirectory,
-                cacheDirectory = cacheDirectory,
-                uploadEnabled = configurationKey.uploadEnabled,
-                torrentProfile = configurationKey.torrentProfile,
-                diskCacheCapacityBytes = configurationKey.diskCacheCapacityBytes,
-                memoryCacheCapacityBytes = torrentMemoryCacheBytesFor(context)
-            )
-        ).also { created ->
+        fun configFor(port: Int) = buildTorrentEngineConfig(
+            stateDirectory = stateDirectory,
+            cacheDirectory = cacheDirectory,
+            uploadEnabled = configurationKey.uploadEnabled,
+            torrentProfile = configurationKey.torrentProfile,
+            diskCacheCapacityBytes = configurationKey.diskCacheCapacityBytes,
+            memoryCacheCapacityBytes = torrentMemoryCacheBytesFor(context),
+            listenPort = port
+        )
+        // Port stable (DHT / pairs connus réutilisables) ; repli sur un port libre si refusé.
+        val stablePort = P2pNetworkBoost.stableListenPort(context)
+        val createdEngine = try {
+            NuvioEngine.create(configFor(stablePort))
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (error: Exception) {
+            Log.w(TAG, "Stable listen port $stablePort refused, falling back to ephemeral", error)
+            NuvioEngine.create(configFor(0))
+        }
+        return createdEngine.also { created ->
             engine = created
             engineConfigurationKey = configurationKey
             observeEngineEvents(created)
@@ -390,6 +406,7 @@ class TorrentService @Inject constructor(
                         statsJob?.cancel()
                         statsJob = null
                         _state.value = error
+                        P2pNetworkBoost.releaseStreamingLocks()
                     }
                     NuvioEventType.StreamStopped -> synchronized(lifecycleLock) {
                         if (engine !== activeEngine) return@synchronized
@@ -406,6 +423,7 @@ class TorrentService @Inject constructor(
                         statsJob?.cancel()
                         statsJob = null
                         _state.value = error
+                        P2pNetworkBoost.releaseStreamingLocks()
                     }
                     else -> Unit
                 }
