@@ -106,7 +106,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         minSdk = 24
         targetSdk = 36
-        versionCode = 1070
+        versionCode = System.getenv("FLUIDE_VERSION_CODE")?.toIntOrNull() ?: 1070
         versionName = "1.1.0-beta.7"
 
         buildConfigField("String", "PARENTAL_GUIDE_API_URL", "\"${localProperties.getProperty("PARENTAL_GUIDE_API_URL", "")}\"")
