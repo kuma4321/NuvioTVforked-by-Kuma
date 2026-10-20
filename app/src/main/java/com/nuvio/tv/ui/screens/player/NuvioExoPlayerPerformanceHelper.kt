@@ -320,7 +320,7 @@ object NuvioExoPlayerPerformanceHelper {
         } else {
             // Profil « lecture fluide » : démarrage rapide, long tampon avant borné par la RAM.
             val heapMb = Runtime.getRuntime().maxMemory() / (1024L * 1024L)
-            val targetMb = (heapMb * 0.45).toInt().coerceIn(100, 384)
+            val targetMb = (heapMb * 0.45).toInt().coerceIn(64, 384)
             DefaultLoadControl.Builder()
                 .setTargetBufferBytes(targetMb * 1024 * 1024)
                 .setBufferDurationsMs(
@@ -329,7 +329,7 @@ object NuvioExoPlayerPerformanceHelper {
                     1_500,
                     4_000
                 )
-                .setPrioritizeTimeOverSizeThresholds(true)
+                .setPrioritizeTimeOverSizeThresholds(false) // le plafond mémoire prime (pas d'OOM en 4K)
                 .build()
         }
     }

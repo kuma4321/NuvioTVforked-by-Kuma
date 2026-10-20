@@ -18,34 +18,19 @@ jobs:
           distribution: temurin
           java-version: "17"
       - uses: gradle/actions/setup-gradle@v6
-      - name: Configuration du compte Nuvio (serveur officiel)
+      - name: Configuration officielle (compte, TMDB, Trakt)
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          NUVIO_SUPABASE_URL: ${{ secrets.NUVIO_SUPABASE_URL }}
+          NUVIO_SUPABASE_ANON_KEY: ${{ secrets.NUVIO_SUPABASE_ANON_KEY }}
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+          TRAKT_CLIENT_ID: ${{ secrets.TRAKT_CLIENT_ID }}
+          TRAKT_CLIENT_SECRET: ${{ secrets.TRAKT_CLIENT_SECRET }}
         run: |
-          set +e
-          mkdir -p /tmp/official && cd /tmp/official
-          tag=$(gh release list -R NuvioMedia/NuvioMobile --limit 10 --json tagName,isDraft --jq '[.[]|select(.isDraft|not)][0].tagName')
-          gh release download "$tag" -R NuvioMedia/NuvioMobile --pattern '*arm64-v8a*.apk' --clobber
-          apk=$(ls *.apk | head -1)
-          unzip -qo "$apk" 'classes*.dex' -d dex
-          strings -n 20 dex/*.dex | sort -u > all.txt
-          url=$(grep -Eo '^https://api\.nuvio\.tv/?$' all.txt | head -1 | sed 's#/$##')
-          fallback=$(grep -Eo '^https://api-two\.nuvioapp\.space/?$' all.txt | head -1 | sed 's#/$##')
-          key=$(grep -Eo '^sb_publishable_[A-Za-z0-9_-]{20,}$' all.txt | head -1)
-          if [ -z "$key" ]; then
-            for jwt in $(grep -Eo '^eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$' all.txt); do
-              p=$(echo "$jwt" | cut -d. -f2 | tr '_-' '/+'); while [ $(( ${#p} % 4 )) -ne 0 ]; do p="$p="; done
-              if echo "$p" | base64 -d 2>/dev/null | grep -q '"anon"'; then key="$jwt"; break; fi
-            done
-          fi
-          if [ -z "$url" ] || [ -z "$key" ]; then echo "::error::Config compte introuvable (url=${url:+ok} cle=${key:+ok})"; exit 1; fi
-          echo "::add-mask::$key"
-          cd "$GITHUB_WORKSPACE"
-          for f in local.properties local.dev.properties; do
-            { echo "NUVIO_SUPABASE_URL=$url"; echo "NUVIO_SUPABASE_ANON_KEY=$key"; [ -n "$fallback" ] && echo "NUVIO_SUPABASE_FALLBACK_URL=$fallback"; } > $f
-          done
-          echo "::notice::Compte Nuvio configure (serveur $url)"
+          bash ci/extract-official-config.sh "$RUNNER_TEMP/official.env"
+          cp "$RUNNER_TEMP/official.env" local.properties
+          cp "$RUNNER_TEMP/official.env" local.dev.properties
       - name: Clé de signature fixe (mises à jour sans désinstaller)
         shell: bash
         env:

@@ -932,7 +932,6 @@ internal fun PlayerRuntimeController.initializePlayer(
                 }
             ).setExtensionRendererMode(effectiveDecoderPriority)
                 .setEnableDecoderFallback(true)
-                .forceEnableMediaCodecAsynchronousQueueing()
                 .setMediaCodecSelector(codecSelector)
                 .applyMapDv7ToHevcIfSupported(mapDv7ToHevcEnabled)
 
