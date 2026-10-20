@@ -21,9 +21,9 @@ strings -n 20 dex/*/*.dex | sort -u > all.txt
 emit() { [ -n "$2" ] && { echo "::add-mask::$2"; echo "$1=$2" >> "$out"; }; }
 
 # --- Serveur de comptes ---
-url="${NUVIO_SUPABASE_URL:-$(grep -Eo '^https://api\.nuvio\.tv/?$' all.txt | head -1 | sed 's#/$##')}"
-fallback="${NUVIO_SUPABASE_FALLBACK_URL:-$(grep -Eo '^https://api-two\.nuvioapp\.space/?$' all.txt | head -1 | sed 's#/$##')}"
-key="${NUVIO_SUPABASE_ANON_KEY:-$(grep -Eo '^sb_publishable_[A-Za-z0-9_-]{20,}$' all.txt | head -1)}"
+url="${NUVIO_SUPABASE_URL:-$(grep -Eo 'https://api\.nuvio\.tv/?$' all.txt | head -1 | sed 's#/$##')}"
+fallback="${NUVIO_SUPABASE_FALLBACK_URL:-$(grep -Eo 'https://api-two\.nuvioapp\.space/?$' all.txt | head -1 | sed 's#/$##')}"
+key="${NUVIO_SUPABASE_ANON_KEY:-$(grep -Eo 'sb_publishable_[A-Za-z0-9_-]{20,}' all.txt | head -1)}"
 if [ -z "$key" ]; then
   for jwt in $(grep -Eo '^eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$' all.txt); do
     p=$(echo "$jwt" | cut -d. -f2 | tr '_-' '/+'); while [ $(( ${#p} % 4 )) -ne 0 ]; do p="$p="; done
@@ -36,17 +36,21 @@ echo "NUVIO_SUPABASE_URL=$url" >> "$out"; emit NUVIO_SUPABASE_ANON_KEY "$key"
 # --- TMDB (clé v3 = 32 hex) : validée en appelant l'API ---
 tmdb="${TMDB_API_KEY:-}"
 if [ -z "$tmdb" ]; then
-  for k in $(strings -n 32 dex/*/*.dex | grep -Eo '^[0-9a-f]{32}$' | sort -u); do
+  # NB : dans un .dex chaque chaîne est précédée de sa longueur (32 -> ' ', 64 -> '@'),
+  # donc pas d'ancre ^ : on extrait les suites hexadécimales de longueur exacte.
+  n=0
+  for k in $(strings -n 32 dex/*/*.dex | grep -Eo '[0-9a-f]+' | awk 'length($0)==32' | sort -u); do
+    n=$((n+1)); [ $n -gt 300 ] && break
     code=$(curl -s -o /dev/null -w '%{http_code}' "https://api.themoviedb.org/3/configuration?api_key=$k")
     [ "$code" = 200 ] && { tmdb="$k"; break; }
   done
 fi
 emit TMDB_API_KEY "$tmdb"
-echo "::notice::TMDB : ${tmdb:+clé valide}${tmdb:-introuvable}"
+echo "::notice::TMDB : ${tmdb:+clé valide}${tmdb:-introuvable} ($(strings -n 32 dex/*/*.dex | grep -Eo '[0-9a-f]+' | awk 'length($0)==32' | sort -u | wc -l) candidats testés max 300)"
 
 # --- Trakt (client id / secret = 64 hex) : id validé via l'API ---
 trakt_id="${TRAKT_CLIENT_ID:-}"; trakt_secret="${TRAKT_CLIENT_SECRET:-}"
-cands=$(strings -n 64 dex/*/*.dex | grep -Eo '^[0-9a-f]{64}$' | sort -u)
+cands=$(strings -n 64 dex/*/*.dex | grep -Eo '[0-9a-f]+' | awk 'length($0)==64' | sort -u | head -100)
 if [ -z "$trakt_id" ]; then
   for k in $cands; do
     code=$(curl -s -o /dev/null -w '%{http_code}' -H 'trakt-api-version: 2' -H "trakt-api-key: $k" \
