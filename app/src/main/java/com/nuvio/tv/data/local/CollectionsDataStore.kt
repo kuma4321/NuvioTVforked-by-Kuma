@@ -181,19 +181,81 @@ class CollectionsDataStore @Inject constructor(
         }
     }
 
+    /**
+     * Lecture tolérante (collections produites par des outils externes comme Kaptain) :
+     * chaque collection, dossier et source est lu séparément. Un élément mal formé ou d'un
+     * type inattendu est ignoré au lieu de faire disparaître TOUTE la configuration.
+     */
     private fun parseCollections(json: String?): List<Collection> {
         if (json.isNullOrBlank()) return emptyList()
-        return try {
-            val type = object : TypeToken<List<SerializableCollection>>() {}.type
-            val parsed = gson.fromJson<List<SerializableCollection>>(json, type).orEmpty()
-            // Deduplicate by ID at parse level to prevent duplicate LazyColumn keys
-            // even if stored data contains duplicates (e.g. from sync or corrupted state).
-            parsed.map { it.toDomain() }
-                .associateBy { it.id }
-                .values.toList()
-        } catch (_: Exception) {
-            emptyList()
+        val root = runCatching { com.google.gson.JsonParser.parseString(json) }.getOrNull() ?: return emptyList()
+        val array = when {
+            root.isJsonArray -> root.asJsonArray
+            root.isJsonObject && root.asJsonObject.get("collections")?.isJsonArray == true ->
+                root.asJsonObject.getAsJsonArray("collections")
+            else -> return emptyList()
         }
+        return array.mapNotNull { element -> runCatching { parseCollectionLenient(element) }.getOrNull() }
+            // Dédoublonnage par ID (clés LazyColumn uniques).
+            .associateBy { it.id }
+            .values.toList()
+    }
+
+    private fun com.google.gson.JsonObject.str(key: String): String? =
+        get(key)?.takeIf { it.isJsonPrimitive }?.asString?.takeIf { it.isNotBlank() }
+
+    private fun com.google.gson.JsonObject.bool(key: String): Boolean? {
+        val v = get(key)?.takeIf { it.isJsonPrimitive }?.asJsonPrimitive ?: return null
+        return when {
+            v.isBoolean -> v.asBoolean
+            v.isNumber -> v.asInt != 0
+            else -> when (v.asString.trim().lowercase()) { "true", "1", "yes" -> true; "false", "0", "no" -> false; else -> null }
+        }
+    }
+
+    private fun parseCollectionLenient(element: com.google.gson.JsonElement): Collection? {
+        val obj = element.takeIf { it.isJsonObject }?.asJsonObject ?: return null
+        val folders = obj.get("folders")?.takeIf { it.isJsonArray }?.asJsonArray
+            ?.mapNotNull { folder -> runCatching { parseFolderLenient(folder) }.getOrNull() }
+            .orEmpty()
+        val title = obj.str("title") ?: obj.str("name") ?: return null
+        val collection = SerializableCollection(
+            id = obj.str("id") ?: "c-" + title.hashCode().toUInt().toString(16),
+            title = title,
+            backdropImageUrl = obj.str("backdropImageUrl"),
+            pinToTop = obj.bool("pinToTop") ?: false,
+            focusGlowEnabled = obj.bool("focusGlowEnabled"),
+            viewMode = obj.str("viewMode") ?: "TABBED_GRID",
+            showAllTab = obj.bool("showAllTab") ?: true,
+            folders = emptyList()
+        )
+        return collection.toDomain().copy(folders = folders)
+    }
+
+    private fun parseFolderLenient(element: com.google.gson.JsonElement): CollectionFolder? {
+        val obj = element.takeIf { it.isJsonObject }?.asJsonObject ?: return null
+        val title = obj.str("title") ?: obj.str("name") ?: ""
+        val sources = obj.get("sources")?.takeIf { it.isJsonArray }?.asJsonArray
+            ?.mapNotNull { src -> runCatching { gson.fromJson(src, SerializableSource::class.java)?.toDomainSource() }.getOrNull() }
+        val catalogSources = obj.get("catalogSources")?.takeIf { it.isJsonArray }?.asJsonArray
+            ?.mapNotNull { src -> runCatching { gson.fromJson(src, SerializableCatalogSource::class.java) }.getOrNull() }
+            ?.filter { it.addonId != null && it.type != null && it.catalogId != null }
+            .orEmpty()
+        return CollectionFolder(
+            id = obj.str("id") ?: "f-" + (title + obj.toString().length).hashCode().toUInt().toString(16),
+            title = title,
+            coverImageUrl = obj.str("coverImageUrl"),
+            focusGifUrl = obj.str("focusGifUrl"),
+            focusGifEnabled = obj.bool("focusGifEnabled") ?: true,
+            coverEmoji = obj.str("coverEmoji"),
+            tileShape = PosterShape.fromString(obj.str("tileShape")),
+            hideTitle = obj.bool("hideTitle") ?: false,
+            heroBackdropUrl = obj.str("heroBackdropUrl"),
+            heroVideoUrl = obj.str("heroVideoUrl"),
+            titleLogoUrl = obj.str("titleLogoUrl"),
+            sources = sources?.takeIf { it.isNotEmpty() || catalogSources.isEmpty() }
+                ?: catalogSources.map { AddonCatalogCollectionSource(it.addonId, it.type, it.catalogId, it.genre) }
+        )
     }
 
     @androidx.annotation.Keep
@@ -394,7 +456,7 @@ class CollectionsDataStore @Inject constructor(
         return when (provider.lowercase()) {
             "tmdb" -> {
                 val type = tmdbSourceType?.let { raw ->
-                    runCatching { TmdbCollectionSourceType.valueOf(raw.uppercase()) }.getOrNull()
+                    runCatching { TmdbCollectionSourceType.valueOf(raw.trim().uppercase()) }.getOrNull()
                 } ?: return null
                 val sourceSortBy = sortBy?.takeIf { it.isNotBlank() } ?: TmdbCollectionSort.POPULAR_DESC.value
                 val normalizedSortBy = if (
@@ -409,9 +471,7 @@ class CollectionsDataStore @Inject constructor(
                     sourceType = type,
                     title = title?.takeIf { it.isNotBlank() } ?: type.name.lowercase().replaceFirstChar { it.uppercase() },
                     tmdbId = tmdbId,
-                    mediaType = mediaType?.let { raw ->
-                        runCatching { TmdbCollectionMediaType.valueOf(raw.uppercase()) }.getOrNull()
-                    } ?: TmdbCollectionMediaType.MOVIE,
+                    mediaType = parseMediaType(mediaType),
                     sortBy = normalizedSortBy,
                     filters = filters?.toDomain() ?: TmdbCollectionFilters()
                 )
@@ -422,9 +482,7 @@ class CollectionsDataStore @Inject constructor(
                     title = title?.takeIf { it.isNotBlank() }
                         ?: string(R.string.collections_editor_trakt_list_with_id, id),
                     traktListId = id,
-                    mediaType = mediaType?.let { raw ->
-                        runCatching { TmdbCollectionMediaType.valueOf(raw.uppercase()) }.getOrNull()
-                    } ?: TmdbCollectionMediaType.MOVIE,
+                    mediaType = parseMediaType(mediaType),
                     sortBy = TraktListSort.normalize(sortBy),
                     sortHow = TraktSortHow.normalize(sortHow)
                 )
@@ -442,6 +500,13 @@ class CollectionsDataStore @Inject constructor(
             }
         }
     }
+
+    /** « series » est le type Stremio/Kaptain des séries : il doit donner TV, pas MOVIE. */
+    private fun parseMediaType(raw: String?): TmdbCollectionMediaType =
+        when (raw?.trim()?.lowercase()) {
+            "tv", "series", "show", "shows" -> TmdbCollectionMediaType.TV
+            else -> TmdbCollectionMediaType.MOVIE
+        }
 
     private fun SerializableTmdbFilters.toDomain() = TmdbCollectionFilters(
         withGenres = withGenres,
