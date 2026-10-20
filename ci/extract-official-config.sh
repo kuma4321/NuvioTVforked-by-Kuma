@@ -6,13 +6,18 @@
 set -uo pipefail
 out="$(realpath -m "$1")"; : > "$out"
 work=$(mktemp -d); cd "$work"
-tag=$(gh release list -R NuvioMedia/NuvioMobile --limit 10 --json tagName,isDraft \
-  --jq '[.[]|select(.isDraft|not)][0].tagName')
-gh release download "$tag" -R NuvioMedia/NuvioMobile --pattern '*arm64-v8a*.apk' --clobber >/dev/null
-unzip -qo "$(ls *.apk | head -1)" 'classes*.dex' -d dex
-strings -n 20 dex/*.dex | sort -u > all.txt
-echo "::notice::Configuration lue depuis l'APK officiel $tag"
-
+: > all.txt; mkdir -p dex
+for repo in NuvioMedia/NuvioMobile NuvioMedia/NuvioTV; do
+  tag=$(gh release list -R "$repo" --limit 10 --json tagName,isDraft --jq '[.[]|select(.isDraft|not)][0].tagName' 2>/dev/null)
+  [ -z "$tag" ] && continue
+  mkdir -p "dl/$repo"
+  gh release download "$tag" -R "$repo" --pattern '*.apk' --dir "dl/$repo" --clobber >/dev/null 2>&1
+  apk=$(ls -S dl/$repo/*.apk 2>/dev/null | grep -i 'arm64' | head -1); [ -z "$apk" ] && apk=$(ls -S dl/$repo/*.apk 2>/dev/null | head -1)
+  [ -z "$apk" ] && continue
+  d="dex/$(echo "$repo" | tr '/' '_')"; mkdir -p "$d"; unzip -qo "$apk" 'classes*.dex' -d "$d"
+  echo "::notice::APK officiel lu : $repo $tag ($(basename "$apk"))"
+done
+strings -n 20 dex/*/*.dex | sort -u > all.txt
 emit() { [ -n "$2" ] && { echo "::add-mask::$2"; echo "$1=$2" >> "$out"; }; }
 
 # --- Serveur de comptes ---
@@ -31,7 +36,7 @@ echo "NUVIO_SUPABASE_URL=$url" >> "$out"; emit NUVIO_SUPABASE_ANON_KEY "$key"
 # --- TMDB (clé v3 = 32 hex) : validée en appelant l'API ---
 tmdb="${TMDB_API_KEY:-}"
 if [ -z "$tmdb" ]; then
-  for k in $(strings -n 32 dex/*.dex | grep -Eo '^[0-9a-f]{32}$' | sort -u); do
+  for k in $(strings -n 32 dex/*/*.dex | grep -Eo '^[0-9a-f]{32}$' | sort -u); do
     code=$(curl -s -o /dev/null -w '%{http_code}' "https://api.themoviedb.org/3/configuration?api_key=$k")
     [ "$code" = 200 ] && { tmdb="$k"; break; }
   done
@@ -41,7 +46,7 @@ echo "::notice::TMDB : ${tmdb:+clé valide}${tmdb:-introuvable}"
 
 # --- Trakt (client id / secret = 64 hex) : id validé via l'API ---
 trakt_id="${TRAKT_CLIENT_ID:-}"; trakt_secret="${TRAKT_CLIENT_SECRET:-}"
-cands=$(strings -n 64 dex/*.dex | grep -Eo '^[0-9a-f]{64}$' | sort -u)
+cands=$(strings -n 64 dex/*/*.dex | grep -Eo '^[0-9a-f]{64}$' | sort -u)
 if [ -z "$trakt_id" ]; then
   for k in $cands; do
     code=$(curl -s -o /dev/null -w '%{http_code}' -H 'trakt-api-version: 2' -H "trakt-api-key: $k" \
